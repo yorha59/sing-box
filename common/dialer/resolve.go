@@ -2,8 +2,12 @@ package dialer
 
 import (
 	"context"
+	"errors"
 	"net"
+	"net/netip"
+	"slices"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -56,6 +60,7 @@ func NewResolveDialer(ctx context.Context, dialer N.Dialer, parallel bool, serve
 				fallbackDelay: fallbackDelay,
 			},
 			parallelDialer,
+			false,
 		}
 	}
 	return &resolveDialer{
@@ -71,7 +76,8 @@ func NewResolveDialer(ctx context.Context, dialer N.Dialer, parallel bool, serve
 
 type resolveParallelNetworkDialer struct {
 	resolveDialer
-	dialer ParallelInterfaceDialer
+	dialer         ParallelInterfaceDialer
+	checkIPv6Route bool
 }
 
 func (d *resolveDialer) initialize() error {
@@ -139,6 +145,13 @@ func (d *resolveDialer) Upstream() any {
 	return d.dialer
 }
 
+func (d *resolveParallelNetworkDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	if d.checkIPv6Route && destination.IsDomain() {
+		return d.DialParallelInterface(ctx, network, destination, nil, nil, nil, 0)
+	}
+	return d.resolveDialer.DialContext(ctx, network, destination)
+}
+
 func (d *resolveParallelNetworkDialer) DialParallelInterface(ctx context.Context, network string, destination M.Socksaddr, strategy *C.NetworkStrategy, interfaceType []C.InterfaceType, fallbackInterfaceType []C.InterfaceType, fallbackDelay time.Duration) (net.Conn, error) {
 	err := d.initialize()
 	if err != nil {
@@ -152,6 +165,7 @@ func (d *resolveParallelNetworkDialer) DialParallelInterface(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	addresses = d.directAddresses(ctx, destination, addresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
 	if fallbackDelay == 0 {
 		fallbackDelay = d.fallbackDelay
 	}
@@ -175,6 +189,7 @@ func (d *resolveParallelNetworkDialer) ListenSerialInterfacePacket(ctx context.C
 	if err != nil {
 		return nil, err
 	}
+	addresses = d.directAddresses(ctx, destination, addresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
 	if fallbackDelay == 0 {
 		fallbackDelay = d.fallbackDelay
 	}
@@ -183,6 +198,52 @@ func (d *resolveParallelNetworkDialer) ListenSerialInterfacePacket(ctx context.C
 		return nil, err
 	}
 	return bufio.NewNATPacketConn(bufio.NewPacketConn(conn), M.SocksaddrFrom(destinationAddress, destination.Port), destination), nil
+}
+
+func (d *resolveParallelNetworkDialer) directAddresses(ctx context.Context, destination M.Socksaddr, addresses []netip.Addr, strategy *C.NetworkStrategy, interfaceType, fallbackInterfaceType []C.InterfaceType, fallbackDelay time.Duration) []netip.Addr {
+	if !d.checkIPv6Route || !destination.IsDomain() {
+		return addresses
+	}
+	filtered := usableDirectAddresses(addresses, func(address netip.Addr) error {
+		// UDP connect uses the current physical route without sending packets.
+		conn, err := d.dialer.DialParallelInterface(ctx, N.NetworkUDP, M.SocksaddrFrom(address, destination.Port), strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+		if err == nil {
+			conn.Close()
+		}
+		return err
+	})
+	if len(filtered) != len(addresses) {
+		if factory := service.FromContext[log.Factory](ctx); factory != nil {
+			factory.Logger().DebugContext(ctx, "direct: skipped IPv6 addresses without an outbound route for ", destination.Fqdn)
+		}
+	}
+	return filtered
+}
+
+func usableDirectAddresses(addresses []netip.Addr, checkRoute func(netip.Addr) error) []netip.Addr {
+	if !slices.ContainsFunc(addresses, func(address netip.Addr) bool { return address.Unmap().Is4() }) {
+		return addresses
+	}
+	var filtered []netip.Addr
+	for index, address := range addresses {
+		if address.Is6() && !address.Is4In6() {
+			err := checkRoute(address)
+			if errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.EADDRNOTAVAIL) {
+				if filtered == nil {
+					filtered = make([]netip.Addr, index, len(addresses))
+					copy(filtered, addresses[:index])
+				}
+				continue
+			}
+		}
+		if filtered != nil {
+			filtered = append(filtered, address)
+		}
+	}
+	if filtered != nil {
+		return filtered
+	}
+	return addresses
 }
 
 func (d *resolveParallelNetworkDialer) QueryOptions() adapter.DNSQueryOptions {

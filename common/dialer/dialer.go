@@ -97,6 +97,11 @@ func NewWithOptions(options Options) (N.Dialer, error) {
 			dnsQueryOptions,
 			time.Duration(dialOptions.FallbackDelay),
 		)
+		if options.DirectOutbound && C.IsIos {
+			if resolver, ok := dialer.(*resolveParallelNetworkDialer); ok {
+				resolver.checkIPv6Route = true
+			}
+		}
 	}
 	return dialer, nil
 }

@@ -50,6 +50,10 @@ func DialParallelNetwork(ctx context.Context, dialer ParallelInterfaceDialer, ne
 		}
 		destinationAddresses = []netip.Addr{destination.Addr}
 	}
+	if resolver, ok := dialer.(*resolveParallelNetworkDialer); ok && resolver.checkIPv6Route && destination.IsDomain() {
+		destinationAddresses = resolver.directAddresses(ctx, destination, destinationAddresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+		dialer = resolver.dialer
+	}
 	return N.DialParallel(ctx, &networkStrategyDialer{
 		ParallelInterfaceDialer: dialer,
 		strategy:                strategy,
@@ -77,6 +81,10 @@ func ListenSerialNetworkPacket(ctx context.Context, dialer N.Dialer, destination
 			panic("invalid usage")
 		}
 		destinationAddresses = []netip.Addr{destination.Addr}
+	}
+	if resolver, ok := dialer.(*resolveParallelNetworkDialer); ok && resolver.checkIPv6Route && destination.IsDomain() {
+		destinationAddresses = resolver.directAddresses(ctx, destination, destinationAddresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+		dialer = resolver.dialer
 	}
 	if parallelDialer, isParallel := dialer.(ParallelNetworkDialer); isParallel {
 		return parallelDialer.ListenSerialNetworkPacket(ctx, destination, destinationAddresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
