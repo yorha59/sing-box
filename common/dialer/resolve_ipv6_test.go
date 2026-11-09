@@ -17,14 +17,14 @@ func TestUsableDirectAddresses(t *testing.T) {
 	ipv4 := netip.MustParseAddr("192.0.2.1")
 	addresses := []netip.Addr{ipv6, privateIPv6, ipv4}
 
-	if got := usableDirectAddresses(addresses); !slices.Equal(got, []netip.Addr{privateIPv6, ipv4}) {
+	if got := usableDirectAddresses(addresses, false, true); !slices.Equal(got, []netip.Addr{privateIPv6, ipv4}) {
 		t.Fatalf("got %v, want private IPv6 and IPv4 candidates", got)
 	}
 	if !slices.Equal(addresses, []netip.Addr{ipv6, privateIPv6, ipv4}) {
 		t.Fatalf("original address list was modified: %v", addresses)
 	}
 	onlyIPv6 := []netip.Addr{ipv6}
-	if got := usableDirectAddresses(onlyIPv6); !slices.Equal(got, onlyIPv6) {
+	if got := usableDirectAddresses(onlyIPv6, false, true); !slices.Equal(got, onlyIPv6) {
 		t.Fatalf("got %v, want %v", got, onlyIPv6)
 	}
 }
@@ -48,7 +48,7 @@ func (m *ipv6TestInterfaceMonitor) DefaultInterface() *control.Interface { retur
 
 func (m *ipv6TestInterfaceMonitor) MyInterfaces() []string { return nil }
 
-func TestOutboundIPv6UnavailableFollowsSelectedInterfaces(t *testing.T) {
+func TestOutboundIPRoutesUnavailableFollowsSelectedInterfaces(t *testing.T) {
 	wifi := adapter.NetworkInterface{
 		Interface:            control.Interface{Name: "en0", Index: 1},
 		IPv6RouteUnavailable: true,
@@ -62,20 +62,37 @@ func TestOutboundIPv6UnavailableFollowsSelectedInterfaces(t *testing.T) {
 	}
 	defaultStrategy := C.NetworkStrategyDefault
 	dialer := &DefaultDialer{networkManager: manager, networkStrategy: &defaultStrategy}
-	if !dialer.outboundIPv6Unavailable(nil, nil, nil) {
+	if ipv4, ipv6 := dialer.outboundIPRoutesUnavailable(nil, nil, nil); ipv4 || !ipv6 {
 		t.Fatal("default Wi-Fi has no IPv6 route")
 	}
 	fallbackStrategy := C.NetworkStrategyFallback
-	if dialer.outboundIPv6Unavailable(&fallbackStrategy, nil, nil) {
+	if ipv4, ipv6 := dialer.outboundIPRoutesUnavailable(&fallbackStrategy, nil, nil); ipv4 || ipv6 {
 		t.Fatal("cellular fallback may have an IPv6 route")
 	}
 	manager.monitor.active = &cellular.Interface
-	if dialer.outboundIPv6Unavailable(nil, nil, nil) {
-		t.Fatal("cellular is now the default and may have an IPv6 route")
+	manager.interfaces[1].IPv4RouteUnavailable = true
+	if ipv4, ipv6 := dialer.outboundIPRoutesUnavailable(nil, nil, nil); !ipv4 || ipv6 {
+		t.Fatal("cellular is now the default and has no IPv4 route")
 	}
 	manager.monitor.active = &wifi.Interface
 	manager.interfaces[0].IPv6RouteUnavailable = false
-	if dialer.outboundIPv6Unavailable(nil, nil, nil) {
+	if _, ipv6 := dialer.outboundIPRoutesUnavailable(nil, nil, nil); ipv6 {
 		t.Fatal("the same Wi-Fi interface acquired an IPv6 route")
+	}
+}
+
+func TestUsableDirectAddressesOnIPv6OnlyRoute(t *testing.T) {
+	ipv4 := netip.MustParseAddr("192.0.2.1")
+	mappedIPv4 := netip.MustParseAddr("::ffff:192.0.2.2")
+	privateIPv4 := netip.MustParseAddr("192.168.1.1")
+	nat64 := netip.MustParseAddr("64:ff9b::c000:201")
+	addresses := []netip.Addr{ipv4, mappedIPv4, privateIPv4, nat64}
+	if got := usableDirectAddresses(addresses, true, false); !slices.Equal(got, []netip.Addr{privateIPv4, nat64}) {
+		t.Fatalf("got %v, want private IPv4 and DNS64 candidates", got)
+	}
+	for _, input := range [][]netip.Addr{{ipv4, mappedIPv4}, {nat64}} {
+		if got := usableDirectAddresses(input, true, false); !slices.Equal(got, input) {
+			t.Fatalf("single-family input %v changed to %v", input, got)
+		}
 	}
 }

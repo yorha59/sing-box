@@ -95,4 +95,5 @@ type NetworkInterface struct {
 	Constrained      bool
 
 	IPv6RouteUnavailable bool
+	IPv4RouteUnavailable bool
 }

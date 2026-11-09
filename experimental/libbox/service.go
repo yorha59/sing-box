@@ -149,6 +149,7 @@ func (w *platformInterfaceWrapper) NetworkInterfaces() ([]adapter.NetworkInterfa
 				return gateway.Unmap().WithZone("")
 			}), netip.Addr.IsValid),
 			IPv6RouteUnavailable: netInterface.IPv6RouteUnavailable,
+			IPv4RouteUnavailable: netInterface.IPv4RouteUnavailable,
 			Expensive:            netInterface.Metered || isDefault && w.isExpensive,
 			Constrained:          isDefault && w.isConstrained,
 		})

@@ -136,6 +136,7 @@ type NetworkInterface struct {
 
 	// IPv6RouteUnavailable is true only when the platform reports that this interface cannot route IPv6.
 	IPv6RouteUnavailable bool
+	IPv4RouteUnavailable bool
 }
 
 type WIFIState struct {

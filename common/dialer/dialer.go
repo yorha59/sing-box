@@ -99,7 +99,7 @@ func NewWithOptions(options Options) (N.Dialer, error) {
 		)
 		if options.DirectOutbound && C.IsIos {
 			if resolver, ok := dialer.(*resolveParallelNetworkDialer); ok {
-				resolver.checkIPv6Route = true
+				resolver.checkIPRoutes = true
 			}
 		}
 	}

@@ -50,7 +50,7 @@ func DialParallelNetwork(ctx context.Context, dialer ParallelInterfaceDialer, ne
 		}
 		destinationAddresses = []netip.Addr{destination.Addr}
 	}
-	if resolver, ok := dialer.(*resolveParallelNetworkDialer); ok && resolver.checkIPv6Route && destination.IsDomain() {
+	if resolver, ok := dialer.(*resolveParallelNetworkDialer); ok && resolver.checkIPRoutes && destination.IsDomain() {
 		destinationAddresses = resolver.directAddresses(ctx, destination, destinationAddresses, strategy, interfaceType, fallbackInterfaceType)
 		dialer = resolver.dialer
 	}
@@ -82,7 +82,7 @@ func ListenSerialNetworkPacket(ctx context.Context, dialer N.Dialer, destination
 		}
 		destinationAddresses = []netip.Addr{destination.Addr}
 	}
-	if resolver, ok := dialer.(*resolveParallelNetworkDialer); ok && resolver.checkIPv6Route && destination.IsDomain() {
+	if resolver, ok := dialer.(*resolveParallelNetworkDialer); ok && resolver.checkIPRoutes && destination.IsDomain() {
 		destinationAddresses = resolver.directAddresses(ctx, destination, destinationAddresses, strategy, interfaceType, fallbackInterfaceType)
 		dialer = resolver.dialer
 	}

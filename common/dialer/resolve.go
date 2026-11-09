@@ -74,8 +74,8 @@ func NewResolveDialer(ctx context.Context, dialer N.Dialer, parallel bool, serve
 
 type resolveParallelNetworkDialer struct {
 	resolveDialer
-	dialer         ParallelInterfaceDialer
-	checkIPv6Route bool
+	dialer        ParallelInterfaceDialer
+	checkIPRoutes bool
 }
 
 func (d *resolveDialer) initialize() error {
@@ -144,7 +144,7 @@ func (d *resolveDialer) Upstream() any {
 }
 
 func (d *resolveParallelNetworkDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	if d.checkIPv6Route && destination.IsDomain() {
+	if d.checkIPRoutes && destination.IsDomain() {
 		return d.DialParallelInterface(ctx, network, destination, nil, nil, nil, 0)
 	}
 	return d.resolveDialer.DialContext(ctx, network, destination)
@@ -200,29 +200,39 @@ func (d *resolveParallelNetworkDialer) ListenSerialInterfacePacket(ctx context.C
 
 func (d *resolveParallelNetworkDialer) directAddresses(ctx context.Context, destination M.Socksaddr, addresses []netip.Addr, strategy *C.NetworkStrategy, interfaceType, fallbackInterfaceType []C.InterfaceType) []netip.Addr {
 	dialer, ok := d.dialer.(*DefaultDialer)
-	if !d.checkIPv6Route || !ok || !destination.IsDomain() || !dialer.outboundIPv6Unavailable(strategy, interfaceType, fallbackInterfaceType) {
+	if !d.checkIPRoutes || !ok || !destination.IsDomain() {
 		return addresses
 	}
-	filtered := usableDirectAddresses(addresses)
+	ipv4Unavailable, ipv6Unavailable := dialer.outboundIPRoutesUnavailable(strategy, interfaceType, fallbackInterfaceType)
+	filtered := usableDirectAddresses(addresses, ipv4Unavailable, ipv6Unavailable)
 	if len(filtered) != len(addresses) {
 		if factory := service.FromContext[log.Factory](ctx); factory != nil {
-			factory.Logger().DebugContext(ctx, "direct: skipped IPv6 addresses without an outbound route for ", destination.Fqdn)
+			factory.Logger().DebugContext(ctx, "direct: skipped addresses without an outbound route for ", destination.Fqdn)
 		}
 	}
 	return filtered
 }
 
-func usableDirectAddresses(addresses []netip.Addr) []netip.Addr {
-	if !slices.ContainsFunc(addresses, func(address netip.Addr) bool { return address.Unmap().Is4() }) {
+func usableDirectAddresses(addresses []netip.Addr, ipv4Unavailable, ipv6Unavailable bool) []netip.Addr {
+	if ipv4Unavailable == ipv6Unavailable {
 		return addresses
 	}
-	isPublicIPv6 := func(address netip.Addr) bool {
-		return address.Is6() && !address.Is4In6() && address.IsGlobalUnicast() && !address.IsPrivate()
-	}
-	if !slices.ContainsFunc(addresses, isPublicIPv6) {
+	hasIPv4 := slices.ContainsFunc(addresses, func(address netip.Addr) bool { return address.Unmap().Is4() })
+	hasIPv6 := slices.ContainsFunc(addresses, func(address netip.Addr) bool { return address.Unmap().Is6() })
+	if !hasIPv4 || !hasIPv6 {
 		return addresses
 	}
-	return slices.DeleteFunc(slices.Clone(addresses), isPublicIPv6)
+	unavailable := func(address netip.Addr) bool {
+		address = address.Unmap()
+		if !address.IsGlobalUnicast() || address.IsPrivate() {
+			return false
+		}
+		return ipv4Unavailable && address.Is4() || ipv6Unavailable && address.Is6()
+	}
+	if !slices.ContainsFunc(addresses, unavailable) {
+		return addresses
+	}
+	return slices.DeleteFunc(slices.Clone(addresses), unavailable)
 }
 
 func (d *resolveParallelNetworkDialer) QueryOptions() adapter.DNSQueryOptions {

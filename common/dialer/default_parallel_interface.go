@@ -215,12 +215,12 @@ func (d *DefaultDialer) serialInterfaceControl(strategy C.NetworkStrategy, inter
 	}
 }
 
-func (d *DefaultDialer) outboundIPv6Unavailable(strategy *C.NetworkStrategy, interfaceType, fallbackInterfaceType []C.InterfaceType) bool {
+func (d *DefaultDialer) outboundIPRoutesUnavailable(strategy *C.NetworkStrategy, interfaceType, fallbackInterfaceType []C.InterfaceType) (ipv4, ipv6 bool) {
 	if strategy == nil {
 		strategy = d.networkStrategy
 	}
 	if strategy == nil || d.networkManager == nil {
-		return false
+		return false, false
 	}
 	if len(interfaceType) == 0 {
 		interfaceType = d.networkType
@@ -229,14 +229,17 @@ func (d *DefaultDialer) outboundIPv6Unavailable(strategy *C.NetworkStrategy, int
 		fallbackInterfaceType = d.fallbackNetworkType
 	}
 	primary, fallback := selectInterfaces(d.networkManager, *strategy, interfaceType, fallbackInterfaceType)
+	if len(primary)+len(fallback) == 0 {
+		return false, false
+	}
+	ipv4, ipv6 = true, true
 	for _, group := range [][]adapter.NetworkInterface{primary, fallback} {
 		for _, iif := range group {
-			if !iif.IPv6RouteUnavailable {
-				return false
-			}
+			ipv4 = ipv4 && iif.IPv4RouteUnavailable
+			ipv6 = ipv6 && iif.IPv6RouteUnavailable
 		}
 	}
-	return len(primary)+len(fallback) > 0
+	return ipv4, ipv6
 }
 
 func selectInterfaces(networkManager adapter.NetworkManager, strategy C.NetworkStrategy, interfaceType []C.InterfaceType, fallbackInterfaceType []C.InterfaceType) (primaryInterfaces []adapter.NetworkInterface, fallbackInterfaces []adapter.NetworkInterface) {
