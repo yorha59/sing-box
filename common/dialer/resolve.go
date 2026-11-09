@@ -2,12 +2,10 @@ package dialer
 
 import (
 	"context"
-	"errors"
 	"net"
 	"net/netip"
 	"slices"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -165,7 +163,7 @@ func (d *resolveParallelNetworkDialer) DialParallelInterface(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	addresses = d.directAddresses(ctx, destination, addresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+	addresses = d.directAddresses(ctx, destination, addresses, strategy, interfaceType, fallbackInterfaceType)
 	if fallbackDelay == 0 {
 		fallbackDelay = d.fallbackDelay
 	}
@@ -189,7 +187,7 @@ func (d *resolveParallelNetworkDialer) ListenSerialInterfacePacket(ctx context.C
 	if err != nil {
 		return nil, err
 	}
-	addresses = d.directAddresses(ctx, destination, addresses, strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+	addresses = d.directAddresses(ctx, destination, addresses, strategy, interfaceType, fallbackInterfaceType)
 	if fallbackDelay == 0 {
 		fallbackDelay = d.fallbackDelay
 	}
@@ -200,18 +198,12 @@ func (d *resolveParallelNetworkDialer) ListenSerialInterfacePacket(ctx context.C
 	return bufio.NewNATPacketConn(bufio.NewPacketConn(conn), M.SocksaddrFrom(destinationAddress, destination.Port), destination), nil
 }
 
-func (d *resolveParallelNetworkDialer) directAddresses(ctx context.Context, destination M.Socksaddr, addresses []netip.Addr, strategy *C.NetworkStrategy, interfaceType, fallbackInterfaceType []C.InterfaceType, fallbackDelay time.Duration) []netip.Addr {
-	if !d.checkIPv6Route || !destination.IsDomain() {
+func (d *resolveParallelNetworkDialer) directAddresses(ctx context.Context, destination M.Socksaddr, addresses []netip.Addr, strategy *C.NetworkStrategy, interfaceType, fallbackInterfaceType []C.InterfaceType) []netip.Addr {
+	dialer, ok := d.dialer.(*DefaultDialer)
+	if !d.checkIPv6Route || !ok || !destination.IsDomain() || !dialer.outboundIPv6Unavailable(strategy, interfaceType, fallbackInterfaceType) {
 		return addresses
 	}
-	filtered := usableDirectAddresses(addresses, func(address netip.Addr) error {
-		// UDP connect uses the current physical route without sending packets.
-		conn, err := d.dialer.DialParallelInterface(ctx, N.NetworkUDP, M.SocksaddrFrom(address, destination.Port), strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
-		if err == nil {
-			conn.Close()
-		}
-		return err
-	})
+	filtered := usableDirectAddresses(addresses)
 	if len(filtered) != len(addresses) {
 		if factory := service.FromContext[log.Factory](ctx); factory != nil {
 			factory.Logger().DebugContext(ctx, "direct: skipped IPv6 addresses without an outbound route for ", destination.Fqdn)
@@ -220,30 +212,17 @@ func (d *resolveParallelNetworkDialer) directAddresses(ctx context.Context, dest
 	return filtered
 }
 
-func usableDirectAddresses(addresses []netip.Addr, checkRoute func(netip.Addr) error) []netip.Addr {
+func usableDirectAddresses(addresses []netip.Addr) []netip.Addr {
 	if !slices.ContainsFunc(addresses, func(address netip.Addr) bool { return address.Unmap().Is4() }) {
 		return addresses
 	}
-	var filtered []netip.Addr
-	for index, address := range addresses {
-		if address.Is6() && !address.Is4In6() {
-			err := checkRoute(address)
-			if errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.EADDRNOTAVAIL) {
-				if filtered == nil {
-					filtered = make([]netip.Addr, index, len(addresses))
-					copy(filtered, addresses[:index])
-				}
-				continue
-			}
-		}
-		if filtered != nil {
-			filtered = append(filtered, address)
-		}
+	isPublicIPv6 := func(address netip.Addr) bool {
+		return address.Is6() && !address.Is4In6() && address.IsGlobalUnicast() && !address.IsPrivate()
 	}
-	if filtered != nil {
-		return filtered
+	if !slices.ContainsFunc(addresses, isPublicIPv6) {
+		return addresses
 	}
-	return addresses
+	return slices.DeleteFunc(slices.Clone(addresses), isPublicIPv6)
 }
 
 func (d *resolveParallelNetworkDialer) QueryOptions() adapter.DNSQueryOptions {

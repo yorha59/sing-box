@@ -215,6 +215,30 @@ func (d *DefaultDialer) serialInterfaceControl(strategy C.NetworkStrategy, inter
 	}
 }
 
+func (d *DefaultDialer) outboundIPv6Unavailable(strategy *C.NetworkStrategy, interfaceType, fallbackInterfaceType []C.InterfaceType) bool {
+	if strategy == nil {
+		strategy = d.networkStrategy
+	}
+	if strategy == nil || d.networkManager == nil {
+		return false
+	}
+	if len(interfaceType) == 0 {
+		interfaceType = d.networkType
+	}
+	if len(fallbackInterfaceType) == 0 {
+		fallbackInterfaceType = d.fallbackNetworkType
+	}
+	primary, fallback := selectInterfaces(d.networkManager, *strategy, interfaceType, fallbackInterfaceType)
+	for _, group := range [][]adapter.NetworkInterface{primary, fallback} {
+		for _, iif := range group {
+			if !iif.IPv6RouteUnavailable {
+				return false
+			}
+		}
+	}
+	return len(primary)+len(fallback) > 0
+}
+
 func selectInterfaces(networkManager adapter.NetworkManager, strategy C.NetworkStrategy, interfaceType []C.InterfaceType, fallbackInterfaceType []C.InterfaceType) (primaryInterfaces []adapter.NetworkInterface, fallbackInterfaces []adapter.NetworkInterface) {
 	interfaces := networkManager.NetworkInterfaces()
 	myInterfaces := networkManager.InterfaceMonitor().MyInterfaces()

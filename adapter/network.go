@@ -93,4 +93,6 @@ type NetworkInterface struct {
 	Gateways         []netip.Addr
 	Expensive        bool
 	Constrained      bool
+
+	IPv6RouteUnavailable bool
 }
