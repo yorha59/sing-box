@@ -284,10 +284,6 @@ func (r *NetworkManager) UpdateInterfaces() error {
 				iif, _ := r.interfaceFinder.ByIndex(it.Index)
 				if iif != nil {
 					it.Interface = *iif
-					if C.IsIos && it.Flags&net.FlagUp != 0 && !strings.HasPrefix(it.Name, "utun") {
-						it.IPv6RouteUnavailable = ipv6RouteUnavailable(r.ctx, it)
-						r.logger.Debug("IPv6 route for ", it.Name, " unavailable: ", it.IPv6RouteUnavailable)
-					}
 				}
 				return it
 			})
@@ -321,21 +317,6 @@ func (r *NetworkManager) UpdateInterfaces() error {
 		}
 		return nil
 	}
-}
-
-// Check the public IPv6 route once when the platform refreshes its interfaces.
-// UDP connect selects a route and source address without writing to the socket.
-func ipv6RouteUnavailable(ctx context.Context, iif adapter.NetworkInterface) bool {
-	dialer := net.Dialer{
-		Control: control.BindToInterface(nil, iif.Name, iif.Index),
-		Timeout: time.Second,
-	}
-	conn, err := dialer.DialContext(ctx, "udp6", "[2606:4700:4700::1111]:53")
-	if err == nil {
-		conn.Close()
-		return false
-	}
-	return errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.EADDRNOTAVAIL)
 }
 
 func (r *NetworkManager) DefaultNetworkInterface() *adapter.NetworkInterface {

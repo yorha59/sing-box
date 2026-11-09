@@ -148,8 +148,9 @@ func (w *platformInterfaceWrapper) NetworkInterfaces() ([]adapter.NetworkInterfa
 				gateway, _ := netip.ParseAddr(it)
 				return gateway.Unmap().WithZone("")
 			}), netip.Addr.IsValid),
-			Expensive:   netInterface.Metered || isDefault && w.isExpensive,
-			Constrained: isDefault && w.isConstrained,
+			IPv6RouteUnavailable: netInterface.IPv6RouteUnavailable,
+			Expensive:            netInterface.Metered || isDefault && w.isExpensive,
+			Constrained:          isDefault && w.isConstrained,
 		})
 	}
 	interfaces = common.UniqBy(interfaces, func(it adapter.NetworkInterface) string {

@@ -133,6 +133,9 @@ type NetworkInterface struct {
 	DNSSearchDomain StringIterator
 	Gateway         StringIterator
 	Metered         bool
+
+	// IPv6RouteUnavailable is true only when the platform reports that this interface cannot route IPv6.
+	IPv6RouteUnavailable bool
 }
 
 type WIFIState struct {
