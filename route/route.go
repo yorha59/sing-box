@@ -450,6 +450,15 @@ func (r *Router) PreMatch(metadata adapter.InboundContext, firstPacket []byte) a
 }
 
 func applyRouteOptionsOverride(metadata *adapter.InboundContext, routeOptions *R.RuleActionRouteOptions) {
+	if routeOptions.NetworkStrategy != nil {
+		metadata.NetworkStrategy = routeOptions.NetworkStrategy
+	}
+	if len(routeOptions.NetworkType) > 0 {
+		metadata.NetworkType = routeOptions.NetworkType
+	}
+	if len(routeOptions.FallbackNetworkType) > 0 {
+		metadata.FallbackNetworkType = routeOptions.FallbackNetworkType
+	}
 	if routeOptions.OverrideAddress.IsValid() {
 		metadata.Destination = M.Socksaddr{
 			Addr: routeOptions.OverrideAddress.Addr,
@@ -486,6 +495,10 @@ func (r *Router) preMatchFlow(ctx context.Context, metadata *adapter.InboundCont
 		return continueResult
 	}
 	outbound = chain[len(chain)-1]
+	if checker, ok := outbound.(adapter.OutboundRouteChecker); ok && checker.RouteUnavailable(metadata) {
+		r.logger.DebugContext(ctx, "pre-match: reject unavailable direct IP route to ", metadata.Destination)
+		return adapter.PreMatchResult{Action: adapter.PreMatchReject, Outbound: outbound}
+	}
 	flowOutbound, isFlowOutbound := outbound.(adapter.FlowOutbound)
 	if !isFlowOutbound {
 		return continueResult
@@ -651,15 +664,6 @@ match:
 				metadata.DestinationAddresses = nil
 			}
 			applyRouteOptionsOverride(metadata, routeOptions)
-			if routeOptions.NetworkStrategy != nil {
-				metadata.NetworkStrategy = routeOptions.NetworkStrategy
-			}
-			if len(routeOptions.NetworkType) > 0 {
-				metadata.NetworkType = routeOptions.NetworkType
-			}
-			if len(routeOptions.FallbackNetworkType) > 0 {
-				metadata.FallbackNetworkType = routeOptions.FallbackNetworkType
-			}
 			if routeOptions.FallbackDelay != 0 {
 				metadata.FallbackDelay = routeOptions.FallbackDelay
 			}

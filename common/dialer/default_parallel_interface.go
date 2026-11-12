@@ -3,6 +3,7 @@ package dialer
 import (
 	"context"
 	"net"
+	"net/netip"
 	"syscall"
 	"time"
 
@@ -213,6 +214,17 @@ func (d *DefaultDialer) serialInterfaceControl(strategy C.NetworkStrategy, inter
 		}
 		return E.Errors(errors...)
 	}
+}
+
+// IPRouteUnavailable reads cached capabilities for the interfaces this dialer
+// would use. It does not probe the destination or change network state.
+func (d *DefaultDialer) IPRouteUnavailable(address netip.Addr, strategy *C.NetworkStrategy, interfaceType, fallbackInterfaceType []C.InterfaceType) bool {
+	address = address.Unmap()
+	if !address.IsGlobalUnicast() || address.IsPrivate() {
+		return false
+	}
+	ipv4, ipv6 := d.outboundIPRoutesUnavailable(strategy, interfaceType, fallbackInterfaceType)
+	return address.Is4() && ipv4 || address.Is6() && ipv6
 }
 
 func (d *DefaultDialer) outboundIPRoutesUnavailable(strategy *C.NetworkStrategy, interfaceType, fallbackInterfaceType []C.InterfaceType) (ipv4, ipv6 bool) {

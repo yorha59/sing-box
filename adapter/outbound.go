@@ -31,6 +31,12 @@ type OutboundWithMultiplex interface {
 	MultiplexEnabled() bool
 }
 
+// OutboundRouteChecker can reject a known unavailable physical route before a
+// TUN connection is accepted. Unknown capabilities must remain allowed.
+type OutboundRouteChecker interface {
+	RouteUnavailable(metadata *InboundContext) bool
+}
+
 type FlowOutbound interface {
 	Outbound
 	tun.Port

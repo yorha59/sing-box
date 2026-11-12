@@ -183,6 +183,14 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	return conn, nil
 }
 
+func (h *Outbound) RouteUnavailable(metadata *adapter.InboundContext) bool {
+	if metadata.InboundType != C.TypeTun || metadata.Network != N.NetworkTCP || !metadata.Destination.IsIP() {
+		return false
+	}
+	defaultDialer, ok := common.Cast[*dialer.DefaultDialer](h.dialer)
+	return ok && defaultDialer.IPRouteUnavailable(metadata.Destination.Addr, metadata.NetworkStrategy, metadata.NetworkType, metadata.FallbackNetworkType)
+}
+
 func (h *Outbound) PreMatchFlow(network string, destination netip.Addr) adapter.PreMatchAction {
 	if network == N.NetworkICMP && h.icmpPort != nil {
 		if h.isMyLoopbackAddress(destination) {
